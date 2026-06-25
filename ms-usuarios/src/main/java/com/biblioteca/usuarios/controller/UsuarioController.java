@@ -22,7 +22,7 @@ public class UsuarioController {
 
     private static final Logger logger = LoggerFactory.getLogger(UsuarioController.class);
     private final UsuarioService usuarioService;
-
+    // Constructor para inyectar el servicio de usuario
     public UsuarioController(UsuarioService usuarioService) {
         this.usuarioService = usuarioService;
     }
