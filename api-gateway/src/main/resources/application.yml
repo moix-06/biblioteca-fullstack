@@ -1,0 +1,93 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_UNIQUE
+      routes:
+        - id: ms-usuarios
+          uri: lb://ms-usuarios
+          predicates:
+            - Path=/api/usuarios/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/usuarios
+        - id: ms-autores
+          uri: lb://ms-autores
+          predicates:
+            - Path=/api/autores/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/autores
+        - id: ms-editoriales
+          uri: lb://ms-editoriales
+          predicates:
+            - Path=/api/editoriales/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/editoriales
+        - id: ms-categorias
+          uri: lb://ms-categorias
+          predicates:
+            - Path=/api/categorias/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/categorias
+        - id: ms-libros
+          uri: lb://ms-libros
+          predicates:
+            - Path=/api/libros/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/libros
+        - id: ms-ejemplares
+          uri: lb://ms-ejemplares
+          predicates:
+            - Path=/api/ejemplares/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/ejemplares
+        - id: ms-sucursales
+          uri: lb://ms-sucursales
+          predicates:
+            - Path=/api/sucursales/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/sucursales
+        - id: ms-prestamos
+          uri: lb://ms-prestamos
+          predicates:
+            - Path=/api/prestamos/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/prestamos
+        - id: ms-reservas
+          uri: lb://ms-reservas
+          predicates:
+            - Path=/api/reservas/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/reservas
+        - id: ms-multas
+          uri: lb://ms-multas
+          predicates:
+            - Path=/api/multas/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/multas
+        - id: ms-resenas
+          uri: lb://ms-resenas
+          predicates:
+            - Path=/api/resenas/**
+          filters:
+            - AddRequestHeader=X-Forwarded-Prefix, /api/resenas
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    preferIpAddress: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
