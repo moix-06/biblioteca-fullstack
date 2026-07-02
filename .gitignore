@@ -1,0 +1,25 @@
+# ============================================================
+# Archivos generados por Docker / build
+# ============================================================
+.env
+.env.local
+.env.*.local
+
+# Volumenes y datos locales
+mysql_data/
+data/
+
+# Logs
+*.log
+logs/
+
+# ============================================================
+# Archivos tipicos de Java / Maven
+# (los modulos ya tienen su propio .gitignore, esto es por si
+# se compila algo en la raiz)
+# ============================================================
+target/
+*.class
+*.jar
+*.war
+.m2/

@@ -1,0 +1,509 @@
+# ============================================================
+# docker-compose.yml
+# Stack completo del sistema de biblioteca
+# - MySQL con 11 bases de datos (una por microservicio)
+# - Eureka Server (service discovery)
+# - API Gateway (punto de entrada unico, puerto 8080)
+# - 11 microservicios de dominio
+# ============================================================
+#
+# IMPORTANTE - Registro en Eureka desde Docker:
+# Por defecto los MS usan `eureka.instance.prefer-ip-address: true`,
+# que en Docker suele registrar una IP que otros contenedores NO
+# pueden resolver (a veces 127.0.0.1). Para evitarlo, forzamos a
+# cada MS a registrarse con su HOSTNAME (que coincide con el
+# service name de docker-compose y es resoluble por Docker DNS).
+# Tambien forzamos `hostname:` en cada servicio para que
+# `InetAddress.getLocalHost()` devuelva el service name.
+# ============================================================
+
+name: biblioteca
+
+# Anchor comun: config Eureka que se aplica a todos los MS
+# (desactivamos prefer-ip-address para que se use el hostname)
+x-ms-eureka: &ms-eureka
+  EUREKA_INSTANCE_PREFER_IP_ADDRESS: "false"
+
+services:
+
+  # -----------------------------------------------------------
+  # MySQL: un solo contenedor que aloja las 11 bases de datos
+  # -----------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: biblioteca-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command:
+      - --default-authentication-plugin=caching_sha2_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      # Verifica que MySQL responde Y que la base ms_usuarios existe
+      # (es la ultima en crearse en init.sql, asi que confirma que
+      # el script completo se ejecuto)
+      test:
+        - "CMD-SHELL"
+        - "mysql -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD} -e 'SHOW DATABASES' | grep -q ms_usuarios"
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Eureka Server
+  # -----------------------------------------------------------
+  eureka-server:
+    build:
+      context: ./eureka-server
+    image: biblioteca/eureka-server:latest
+    container_name: biblioteca-eureka
+    hostname: eureka-server
+    restart: unless-stopped
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-usuarios  (puerto 8081, db: ms_usuarios)
+  # -----------------------------------------------------------
+  ms-usuarios:
+    build:
+      context: ./ms-usuarios
+    image: biblioteca/ms-usuarios:latest
+    container_name: biblioteca-ms-usuarios
+    hostname: ms-usuarios
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-usuarios
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_usuarios
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-autores   (puerto 8082, db: ms_autores)
+  # -----------------------------------------------------------
+  ms-autores:
+    build:
+      context: ./ms-autores
+    image: biblioteca/ms-autores:latest
+    container_name: biblioteca-ms-autores
+    hostname: ms-autores
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-autores
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_autores
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_LIBROS_URL: ${MS_LIBROS_URL}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-editoriales  (puerto 8083, db: ms_editoriales)
+  # -----------------------------------------------------------
+  ms-editoriales:
+    build:
+      context: ./ms-editoriales
+    image: biblioteca/ms-editoriales:latest
+    container_name: biblioteca-ms-editoriales
+    hostname: ms-editoriales
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-editoriales
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_editoriales
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_LIBROS_URL: ${MS_LIBROS_URL}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-categorias   (puerto 8084, db: ms_categorias)
+  # -----------------------------------------------------------
+  ms-categorias:
+    build:
+      context: ./ms-categorias
+    image: biblioteca/ms-categorias:latest
+    container_name: biblioteca-ms-categorias
+    hostname: ms-categorias
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-categorias
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_categorias
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-libros  (puerto 8085, db: ms_libros)
+  # -----------------------------------------------------------
+  ms-libros:
+    build:
+      context: ./ms-libros
+    image: biblioteca/ms-libros:latest
+    container_name: biblioteca-ms-libros
+    hostname: ms-libros
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-libros
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_libros
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_AUTORES_URL: ${MS_AUTORES_URL}
+      MS_EDITORIALES_URL: ${MS_EDITORIALES_URL}
+      MS_CATEGORIAS_URL: ${MS_CATEGORIAS_URL}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-ejemplares   (puerto 8086, db: ms_ejemplares)
+  # -----------------------------------------------------------
+  ms-ejemplares:
+    build:
+      context: ./ms-ejemplares
+    image: biblioteca/ms-ejemplares:latest
+    container_name: biblioteca-ms-ejemplares
+    hostname: ms-ejemplares
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-ejemplares
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_ejemplares
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_LIBROS_URL: ${MS_LIBROS_URL}
+      MS_SUCURSALES_URL: ${MS_SUCURSALES_URL}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8086/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-sucursales   (puerto 8087, db: ms_sucursales)
+  # -----------------------------------------------------------
+  ms-sucursales:
+    build:
+      context: ./ms-sucursales
+    image: biblioteca/ms-sucursales:latest
+    container_name: biblioteca-ms-sucursales
+    hostname: ms-sucursales
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-sucursales
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_sucursales
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8087/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-prestamos    (puerto 8088, db: ms_prestamos)
+  # -----------------------------------------------------------
+  ms-prestamos:
+    build:
+      context: ./ms-prestamos
+    image: biblioteca/ms-prestamos:latest
+    container_name: biblioteca-ms-prestamos
+    hostname: ms-prestamos
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-prestamos
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_prestamos
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_USUARIOS_URL: ${MS_USUARIOS_URL}
+      MS_EJEMPLARES_URL: ${MS_EJEMPLARES_URL}
+      PRESTAMOS_DURACION_DIAS: ${PRESTAMOS_DURACION_DIAS}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8088/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-reservas     (puerto 8089, db: ms_reservas)
+  # -----------------------------------------------------------
+  ms-reservas:
+    build:
+      context: ./ms-reservas
+    image: biblioteca/ms-reservas:latest
+    container_name: biblioteca-ms-reservas
+    hostname: ms-reservas
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-reservas
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_reservas
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MS_USUARIOS_URL: ${MS_USUARIOS_URL}
+      MS_LIBROS_URL: ${MS_LIBROS_URL}
+      MS_EJEMPLARES_URL: ${MS_EJEMPLARES_URL}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8089/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-multas       (puerto 8090, db: ms_multas)
+  # -----------------------------------------------------------
+  ms-multas:
+    build:
+      context: ./ms-multas
+    image: biblioteca/ms-multas:latest
+    container_name: biblioteca-ms-multas
+    hostname: ms-multas
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-multas
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_multas
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MULTAS_MONTO_POR_DIA: ${MULTAS_MONTO_POR_DIA}
+      MULTAS_MONTO_MAXIMO: ${MULTAS_MONTO_MAXIMO}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # Microservicio: ms-resenas      (puerto 8091, db: ms_resenas)
+  # -----------------------------------------------------------
+  ms-resenas:
+    build:
+      context: ./ms-resenas
+    image: biblioteca/ms-resenas:latest
+    container_name: biblioteca-ms-resenas
+    hostname: ms-resenas
+    restart: unless-stopped
+    environment:
+      <<: *ms-eureka
+      SPRING_PROFILES_ACTIVE: prod
+      EUREKA_URL: ${EUREKA_URL}
+      EUREKA_INSTANCE_HOSTNAME: ms-resenas
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ms_resenas
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8091/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+  # -----------------------------------------------------------
+  # API Gateway
+  # -----------------------------------------------------------
+  api-gateway:
+    build:
+      context: ./api-gateway
+    image: biblioteca/api-gateway:latest
+    container_name: biblioteca-api-gateway
+    hostname: api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      EUREKA_URL: ${EUREKA_URL}
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health 2>/dev/null | grep -q '\"status\":\"UP\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks:
+      - biblioteca-net
+
+# -----------------------------------------------------------
+# Redes y volumenes
+# -----------------------------------------------------------
+networks:
+  biblioteca-net:
+    driver: bridge
+    name: biblioteca-net
+
+volumes:
+  mysql_data:
+    name: biblioteca-mysql-data
